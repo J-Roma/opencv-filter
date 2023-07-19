@@ -1,52 +1,55 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+from facial_landmarks import FaceLandmarks
 
-# Inicializar el video capturando la webcam
+class MouthZoomFilter:
+    def __init__(self):
+        self.fl = FaceLandmarks()
+        self.scale = 2
+
+    def zoom_at(self, img, zoom=1, angle=0, coord=None):
+        cy, cx = [i / 2 for i in img.shape[:-1]] if coord is None else coord[::-1]
+        rot_mat = cv2.getRotationMatrix2D((cx, cy), angle, zoom)
+        return cv2.warpAffine(img, rot_mat, img.shape[1::-1], flags=cv2.INTER_LINEAR)
+
+    def apply_filter(self, frame):
+        frame_copy = frame.copy()
+        height, width, _ = frame.shape
+
+        landmarks = self.fl.get_lips_landmarks(frame)
+        if len(landmarks) > 1:
+            mask = np.zeros((height, width), np.uint8)
+            cv2.fillConvexPoly(mask, landmarks, 255)
+            coordX = ((landmarks[5][0] + landmarks[15][0]) / 2)
+            coordY = ((landmarks[0][1] + landmarks[10][1]) / 2)
+
+            face_extracted = cv2.bitwise_and(frame_copy, frame_copy, mask=mask)
+            face_extracted = self.zoom_at(face_extracted, self.scale, coord=(coordX, coordY))
+
+            mask = self.zoom_at(mask, self.scale, coord=(coordX, coordY))
+            background_mask = cv2.bitwise_not(mask)
+            background = cv2.bitwise_and(frame, frame, mask=background_mask)
+
+            result = cv2.add(background, face_extracted)
+            return result
+        else:
+            return frame
+
 cap = cv2.VideoCapture(0)
-
-# Cargar el modelo de puntos clave faciales de Mediapipe
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1)
+mouth_filter = MouthZoomFilter()
 
 while True:
-    # Leer el siguiente frame del video
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Convertir el frame a RGB (mediapipe requiere imágenes en RGB)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    filtered_frame = mouth_filter.apply_filter(frame)
+    cv2.imshow("Result", filtered_frame)
 
-    # Detectar los puntos clave faciales en el frame
-    results = face_mesh.process(frame_rgb)
-    if results.multi_face_landmarks:
-        face_landmarks = results.multi_face_landmarks[0]
-
-        # Obtener las coordenadas de los puntos clave faciales de la boca
-        mouth_landmarks = []
-        for lm in face_landmarks.landmark:
-            mouth_landmarks.append([int(lm.x * frame.shape[1]), int(lm.y * frame.shape[0])])
-
-        # Convertir las coordenadas de los puntos clave a un arreglo numpy
-        mouth_points = np.array(mouth_landmarks, np.int32)
-
-    # Crear una máscara en blanco para la boca
-    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-
-    # Dibujar la máscara de la boca utilizando los puntos de referencia
-    cv2.drawContours(mask, [mouth_points], -1, 255, cv2.FILLED)
-
-    # Aplicar la máscara en el frame original
-    output_frame = cv2.bitwise_and(frame, frame, mask=mask)
-
-    # Mostrar el frame resultante
-    cv2.imshow("Video en tiempo real", output_frame)
-
-    # Detener el bucle si se presiona la tecla 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    key = cv2.waitKey(30)
+    if key == 27:
         break
 
-# Liberar los recursos
 cap.release()
 cv2.destroyAllWindows()

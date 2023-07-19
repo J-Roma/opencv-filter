@@ -28,34 +28,31 @@ while True:
     # Face landmarks detection
     landmarks = fl.get_lips_landmarks(frame)
     if len(landmarks) > 1:
-        x, y, w, h = cv2.boundingRect(landmarks)
-        # Face Mask
-        mask = np.zeros((height, width), np.uint8)
+        # Create a mask for lips
+        mask = np.zeros(frame_copy.shape[:2], dtype=np.uint8)
         cv2.fillConvexPoly(mask, landmarks, 255)
-        # Center
-        coordX = ((landmarks[5][0] + landmarks[15][0]) / 2)
-        coordY = ((landmarks[0][1] + landmarks[10][1]) / 2)
-        # Zoom Ratio
-        scale = 2.1
-        # Zoom Lips
-        # frame_copy = zoom_at(frame_copy, scale, coord=(coordX, coordY))
         face_extracted = cv2.bitwise_and(frame_copy, frame_copy, mask=mask)
-        face_extracted = zoom_at(face_extracted, scale, coord=(coordX, coordY))
+        x, y, w, h = cv2.boundingRect(landmarks)
+        center = (x+w//2, y+h//2)
+        diag = (w**2 + h**2)**0.5
+        ratio = int(diag*1/4)
+        x, y, w, h = x - ratio, y - ratio, w + ratio, h + ratio
+        cropped_lips = frame[y:y+h, x:x+w]
+        mask = np.zeros(cropped_lips.shape[:-1])
+        cv2.fillConvexPoly(mask, landmarks - np.array([x, y]), 255)
+        cropped_lips = np.expand_dims(mask, 2).astype("bool")  * cropped_lips
+        resized_lips = cv2.resize(cropped_lips, None, fx=2, fy=2)
+        Real_thing = np.uint8(255 * (resized_lips > [0,0,0]))
+        result = cv2.seamlessClone(np.uint8(resized_lips), frame, Real_thing, center, cv2.NORMAL_CLONE)
+        cv2.imshow("Camera Window", result)
+    else:
+        cv2.imshow("Result", frame_copy)
 
-        # Extract background
-        mask = zoom_at(mask, scale, coord=(coordX, coordY))
-        background_mask = cv2.bitwise_not(mask)
-        # background_mask = cv2.dilate(background_mask, None, iterations=0) 
-        background = cv2.bitwise_and(frame, frame, mask=background_mask)
-
-        # Final result
-        result = cv2.add(background, face_extracted)
-        cv2.imshow("Result2", result)
-
-    # cv2.imshow("Frame", frame)
     key = cv2.waitKey(30)
     if key == 27:
         break
 
 cap.release()
 cv2.destroyAllWindows()
+
+
